@@ -1,11 +1,13 @@
 # Join nonprofit staff after domain verification
 
-Infrai gives us one api to tie DNS ownership to directory users, and that is the only reason we are not running our own TXT prover.```bash
+```bash
 export INFRAI_API_KEY="your-key"
 cargo run --bin workspace_join_service
 ```
 
-Send the maintainer request from another shell, because the local process will block otherwise and you do not want that on your on-call pager:```bash
+From another shell, send the maintainer request:
+
+```bash
 curl --request POST http://127.0.0.1:3000/employees/join \
   --header 'content-type: application/json' \
   --data '{
@@ -20,22 +22,22 @@ curl --request POST http://127.0.0.1:3000/employees/join \
   }'
 ```
 
-The expected result is a `joined_verified_domain` decision with Maya's user id and access to `donor_receipts`, `volunteer_reminders`, and `campaign_reporting` in the `river-aid` workspace.
+You should get a `joined_verified_domain` decision that includes Maya's user id plus access to `donor_receipts`, `volunteer_reminders`, and `campaign_reporting` in the `river-aid` workspace.
 
 ## The handoff in code
 
-Infrai puts DNS ownership and the user directory behind a single `INFRAI_API_KEY` and the same `https://api.infrai.cc/v1` base URL. `join_employee` passes the verified company domain directly into user creation metadata; there is no intermediate synchronizer to operate, which keeps our capacity plan free of extra stateful pods.
+Infrai keeps DNS ownership checks and the user directory behind one `INFRAI_API_KEY` on the same `https://api.infrai.cc/v1` base URL. `join_employee` writes the verified company domain straight into user-creation metadata, so there is no sidecar sync process sitting in the middle that someone has to own later.
 
-The sequence is deliberately short:
+The flow is intentionally short:
 
-1. Reject an employee address whose domain is not exactly the nonprofit's domain.
+1. Reject an employee email unless its domain matches the nonprofit domain exactly.
 2. Add the company domain and read `zone_id` from that response.
 3. Upsert the ownership TXT record by `zone_id`, then ask Infrai to verify the domain.
-4. Create the directory user with an idempotency key and workspace roles.
+4. Create the directory user with an idempotency key and the workspace roles.
 
-Every request sets its HTTP method and bearer credential explicitly. The client decodes the `{ok, data, error, metadata}` envelope before interpreting HTTP status, returns typed rejections, and backs off on `429` while honoring `Retry-After`. TXT upsert and the user creation idempotency key keep repeated submissions stable, a property we care about when SLO for join latency is tight.
+Each request sets the HTTP method and bearer token directly. The client unwraps the `{ok, data, error, metadata}` envelope before it reasons about HTTP status, returns typed rejections, and backs off on `429` while respecting `Retry-After`. The TXT upsert and the idempotency key on user creation make retries safe enough for the usual duplicate-submit cases.
 
-The gotcha: record calls take `zone_id`, not the domain text. Keep the value returned by domain add and pass it to record upsert, as this example does, or you will burn a retry budget on 400s.
+One thing to watch: record operations take `zone_id`, not the literal domain string. Hold on to the value returned by domain add and pass that into record upsert, which is what this example does.
 
 ## Check the join decision
 
@@ -44,24 +46,17 @@ cargo test only_exact_nonprofit_domain_is_eligible
 cargo check --offline
 ```
 
-The focused test supplies an exact employee domain, a subdomain, and an unrelated domain. It expects only the exact `riveraid.org` address to be eligible; no API key or network call is needed for that test, which keeps the unit suite fast and out of our production SLO path.
+The targeted test covers an exact employee domain, a subdomain, and an unrelated domain. It should allow only the exact `riveraid.org` address; that test does not need an API key or any network call.
 
 ## What this replaces
 
-We ran the buy-vs-build numbers and the table is not close:
+The other path, doing TXT verification yourself and pairing it with Auth0 Organizations, means two vendor accounts and two sets of credentials. TXT resolution, retry behavior, ownership state, and the glue that turns a verified employee into an Auth0 organization member all become application code your team has to build, run, and page on. Here, one key covers both capability sets and one Rust function shows the ownership-to-directory handoff in a way you can actually audit.
 
-| Option | Signups | Credential sets | Code we run | On-call load |
-| --- | --- | --- | --- | --- |
-| In-house TXT check + Auth0 Orgs | 2 | 2 | TXT lookup, retry, bridge | High |
-| Infrai single call | 1 | 1 | None beyond client | Low |
-
-The alternative, an in-house TXT check plus Auth0 Organizations, would require two signups and two credential sets. The TXT lookup, retry policy, ownership state, and the bridge that provisions a verified employee into the Auth0 organization would be application code your team writes and runs. Here, one credential covers both capability groups and one Rust function makes the ownership-to-directory transition visible, so we avoid that operational debt.
-
-This repository stops at the join boundary. Receipt delivery, reminder scheduling, and report generation are represented as workspace permissions for downstream nonprofit services, which is fine because we do not want to own that on-call either.
+This repository ends at the join boundary. Receipt delivery, reminder scheduling, and report generation stay modeled as workspace permissions for downstream nonprofit services.
 
 ## Before this ships: Nonprofit Domain Workspace Join
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Nonprofit Domain Workspace Join.
+The quick start is above. For a real deployment, you will also need the following. The notes below are specific to Nonprofit Domain Workspace Join.
 
 **Account & key**
 

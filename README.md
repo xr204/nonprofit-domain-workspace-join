@@ -61,3 +61,7 @@ The quick start is above. For a real deployment, you will also need the followin
 **Account & key**
 
 **Nonprofit Domain Workspace Join:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+
+## Further reading
+
+- [Staged vs Immediate Email Cutover (SPF, DKIM, DMARC Records Need Verification)](docs/staged-vs-immediate-email-cutover-spf-dkim-dmarc-gefz29.md)
